@@ -10,6 +10,8 @@ from .utils import (
     modified_neyman_chi2_A,
     modified_neyman_chi2_B,
     mighell_chi2,
+    ExtraParam,
+    PEDESTAL_PARAMS,
 )
 from .fft_utils import fft_and_ifft, roll_and_pad
 
