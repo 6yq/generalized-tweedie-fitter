@@ -191,20 +191,11 @@ class Tweedie_Fitter(PMT_Fitter):
         self._init[1] = ped_sigma
         self._init[2] = spe_mean
         self._init[3] = spe_sigma
-        self._bounds_in[0] = (ped_mean - 5 * ped_sigma, ped_mean + 5 * ped_sigma)
-        self._bounds_in[1] = (1e-6, 2 * ped_sigma)
+        ped_mean_fluc = 400
+        self._bounds_in[0] = (ped_mean - ped_mean_fluc, ped_mean + ped_mean_fluc)
+        self._bounds_in[1] = (0, None)
         self._bounds_in[2] = (0.5 * spe_mean, 1.5 * spe_mean)
-        self._bounds_in[3] = (0.05 * spe_sigma, 3.0 * spe_sigma)
-
-    def _replace_spe_params(self, mean_init, sigma_init):
-        s = self._start_idx
-        self._init[s] = mean_init
-        self._init[s + 1] = sigma_init
-
-    def _replace_spe_bounds(self, mean_bound, sigma_bound):
-        s = self._start_idx
-        self._bounds_in[s] = (0.5 * mean_bound, 1.5 * mean_bound)
-        self._bounds_in[s + 1] = (0.05 * sigma_bound, 3.0 * sigma_bound)
+        self._bounds_in[3] = (0, spe_mean)
 
     # ==============================
     #     Reporting
