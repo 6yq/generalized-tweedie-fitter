@@ -63,6 +63,9 @@ class Tweedie_Fitter(PMT_Fitter):
         Bounds for (spe_mean, spe_sigma).
     lam_init : float or None
         Initial light intensity lam = -log(1 - occ).
+    q_min : float or None
+        Left edge of the FFT grid.  Pass charges.min() so xsp covers the
+        pedestal region when ped_mean < bins[0].  Defaults to bins[0].
     sample : int or None
         Sub-sampling factor per bin.
     seterr : str
@@ -91,6 +94,7 @@ class Tweedie_Fitter(PMT_Fitter):
         spe_init=None,
         spe_bounds=None,
         lam_init=None,
+        q_min=None,
         sample=None,
         seterr: str = "warn",
         fit_total: bool = True,
@@ -110,6 +114,7 @@ class Tweedie_Fitter(PMT_Fitter):
             A=A,
             lam_init=lam_init,
             sample=sample,
+            q_min=q_min,
             init=[ep.init for ep in extra_params] + list(spe_init),
             bounds=[ep.bound for ep in extra_params] + list(spe_bounds),
             constraints=constraints or self._DEFAULT_CONSTRAINTS,

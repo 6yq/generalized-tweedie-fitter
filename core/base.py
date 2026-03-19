@@ -67,8 +67,10 @@ class PMT_Fitter:
         Bounds matching init.  logA and lam bounds are appended automatically.
     constraints : list of dict or None
         Linear constraints on [spe_params..., lam].
-    seterr : str
-        numpy floating-point error mode.
+    q_min : float or None
+        Left edge of the FFT grid.  Pass charges.min() so xsp extends far
+        enough left to cover the pedestal when ped_mean < bins[0].
+        Defaults to bins[0] (no leftward extension) when None.
     fit_total : bool
         Whether to include logA as a free parameter.
     """
@@ -80,6 +82,7 @@ class PMT_Fitter:
         A=None,
         lam_init=None,
         sample=None,
+        q_min=None,
         init=None,
         bounds=None,
         constraints=None,
@@ -120,7 +123,8 @@ class PMT_Fitter:
 
         self._bin_width = float(self.bins[1] - self.bins[0])
         self._xsp_width = self._bin_width / self.sample
-        self._shift = int(np.ceil(self.bins[0] / self._xsp_width))
+        _q_min = float(q_min) if q_min is not None else float(self.bins[0])
+        self._shift = int(np.ceil((self.bins[0] - _q_min) / self._xsp_width))
 
         self.xsp = np.linspace(
             self.bins[0] - abs(self._shift) * self._xsp_width,
