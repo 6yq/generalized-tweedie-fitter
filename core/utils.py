@@ -3,8 +3,6 @@ import operator
 
 import numpy as np
 from typing import NamedTuple
-from scipy.optimize import minimize
-from scipy.stats import norm
 
 
 # =============================================
@@ -161,17 +159,16 @@ PEDESTAL_PARAMS: list[ExtraParam] = [
 
 
 def compute_init(hist, edges):
-    """Estimate pedestal and SPE initial parameters via a 4-Gaussian mixture fit.
+    """Estimate pedestal and SPE initial parameters via a 4-Gaussian mixture fit
+    using ROOT's TH1F + TF1 fitter.
 
-    The 4 Gaussians correspond to n = 1, 2, 3, 4 PE, all visible inside the
-    histogram window::
+    The 4 Gaussians correspond to n = 1, 2, 3, 4 PE::
 
         p(q) = sum_{n=1}^{4}  w_n * N(mu_0 + n*G,  sqrt(sigma_0^2 + n*sigma_G^2))
 
-    where mu_0 is the pedestal mean, G is the gain, sigma_0 is the pedestal
-    sigma, and sigma_G is the SPE charge resolution.  The pedestal itself
-    (n=0) lives outside the window and is not a mixture component — its
-    parameters are derived: ped_mean = mu_0 = mu1 - G, ped_sigma = sigma_0.
+    Pedestal parameters are derived:
+        ped_mean  = mu_0  = mu1 - G
+        ped_sigma = sigma_0  (substituted with spe_sigma / sqrt(2))
 
     Parameters
     ----------
@@ -180,12 +177,15 @@ def compute_init(hist, edges):
 
     Returns
     -------
-    ped_mean  : float   mu_0 = mu1 - G
-    ped_sigma : float   sigma_0  (robust estimate: spe_sigma / sqrt(2))
-    spe_mean  : float   G
-    spe_sigma : float   sigma_G
+    ped_mean  : float
+    ped_sigma : float
+    spe_mean  : float
+    spe_sigma : float
     """
+    import ROOT
     from scipy.signal import find_peaks
+
+    ROOT.gErrorIgnoreLevel = ROOT.kError
 
     xs = (edges[:-1] + edges[1:]) / 2.0
     counts = hist.astype(float)
@@ -212,43 +212,78 @@ def compute_init(hist, edges):
         G_rough = float(np.average(xs, weights=counts))
         mu1_rough = G_rough
 
-    def _dmix(q, mu1, G, var_G, var_0, w):
-        d = np.zeros_like(q, dtype=float)
-        for i, n in enumerate(range(1, 5)):
-            sigma_n = np.sqrt(max(var_0 + n * var_G, 1e-12))
-            d += w[i] * norm.pdf(q, loc=mu1 + (n - 1) * G, scale=sigma_n)
-        return d
+    # ==============================
+    #     Build ROOT histogram
+    # ==============================
 
-    def _nll(par):
-        mu1, G, var_G, var_0, w1, w2, w3 = par
-        w4 = 1.0 - w1 - w2 - w3
-        if w4 < 0 or G < 0 or var_G < 0 or var_0 < 0:
-            return np.inf
-        pdf = _dmix(xs, mu1, G, var_G, var_0, [w1, w2, w3, w4])
-        return -float(np.sum(counts * np.log(np.maximum(pdf, 1e-300))))
+    n_bins = len(hist)
+    th1 = ROOT.TH1F("h_init", "", n_bins, edges[0], edges[-1])
+    ROOT.SetOwnership(th1, False)
+    for i, c in enumerate(counts):
+        th1.SetBinContent(i + 1, c)
+        th1.SetBinError(i + 1, max(c**0.5, 1.0))
 
-    p0 = [
-        mu1_rough,  # mu1      (1PE peak position)
-        G_rough,  # G        (gain)
-        (0.20 * G_rough) ** 2,  # var_G    (SPE variance)
-        (0.05 * G_rough) ** 2,  # var_0    (pedestal variance)
-        0.50,  # w1
-        0.30,  # w2
-        0.15,  # w3
-    ]
+    # ==============================
+    #     Define 4-Gaussian TF1
+    # ==============================
+    # Parameters:
+    #   [0] = ped_mean   (pedestal mean, directly)
+    #   [1] = G          (gain = peak spacing)
+    #   [2] = sigma_G    (SPE charge resolution)
+    #   [3] = sigma_0    (pedestal sigma)
+    #   [4] = w1, [5] = w2, [6] = w3   (weights; w4 = 1 - w1 - w2 - w3)
+    #
+    # n-th peak (n=1..4): mean = ped_mean + n*G,
+    #                     sigma = sqrt(sigma_0^2 + n*sigma_G^2)
+    # Amplitude = w_n * total * bin_width / (sqrt(2*pi) * sigma_n)
 
-    res = minimize(
-        _nll,
-        p0,
-        method="Nelder-Mead",
-        options={"maxiter": 20000, "xatol": 1e-4, "fatol": 1e-4},
+    total = float(counts.sum())
+    bw = float(edges[1] - edges[0])
+
+    # build formula; w4 expressed as (1 - w1 - w2 - w3)
+    parts = []
+    for n in range(1, 5):
+        mean = f"([0]+{n}*[1])"
+        sigma = f"sqrt([3]*[3]+{n}*[2]*[2])"
+        w = f"[{3+n}]" if n < 4 else f"(1-[4]-[5]-[6])"
+        amp = f"{total}*{bw}"
+        parts.append(f"{w}*{amp}*exp(-0.5*((x-{mean})/{sigma})^2)/({sigma}*sqrt(2*pi))")
+    formula = "+".join(parts)
+
+    tf1 = ROOT.TF1("f_mix", formula, edges[0], edges[-1])
+    ROOT.SetOwnership(tf1, False)
+    tf1.SetNpx(n_bins * 4)
+
+    ped_mean_rough = mu1_rough - G_rough
+
+    tf1.SetParameters(
+        ped_mean_rough, G_rough, 0.20 * G_rough, 0.05 * G_rough, 0.50, 0.25, 0.15
     )
 
-    mu1, G, var_G, var_0 = res.x[:4]
+    for i, name in enumerate(["ped_mean", "G", "sigma_G", "sigma_0", "w1", "w2", "w3"]):
+        tf1.SetParName(i, name)
+
+    tf1.SetParLimits(0, ped_mean_rough - 400, ped_mean_rough + 400)
+    tf1.SetParLimits(1, G_rough * 0.3, G_rough * 2.0)
+    # sigma_G and sigma_0 are free — no SetParLimits
+    tf1.SetParLimits(4, 0.01, 0.97)  # w1
+    tf1.SetParLimits(5, 0.01, 0.97)  # w2
+    tf1.SetParLimits(6, 0.01, 0.97)  # w3
+
+    # ==============================
+    #     Fit
+    # ==============================
+
+    # S: store result, R: use TF1 range, Q: quiet, B: respect limits
+    th1.Fit("f_mix", "SRQB")
+
+    ped_mean = float(tf1.GetParameter(0))
+    G = float(tf1.GetParameter(1))
+    sG = float(tf1.GetParameter(2))
+
     spe_mean = float(G)
-    spe_sigma = float(np.sqrt(max(var_G, 1e-12)))
-    ped_mean = float(mu1 - G)
-    ped_sigma = spe_sigma / np.sqrt(2.0)
+    spe_sigma = float(sG)
+    ped_sigma = spe_sigma / (2.0**0.5)
 
     print(f"[AUTO] ped_mean={ped_mean:.4g}  ped_sigma={ped_sigma:.4g}", flush=True)
     print(f"[AUTO] spe_mean={spe_mean:.4g}  spe_sigma={spe_sigma:.4g}", flush=True)
