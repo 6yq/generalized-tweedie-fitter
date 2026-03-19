@@ -1,160 +1,134 @@
+#!/usr/bin/env python3
 import numpy as np
-import matplotlib.pyplot as plt
 
-from tweedie import tweedie
-from scipy.stats import norm, gamma, poisson, bernoulli
+from scipy.stats import norm, gamma
 
 
-def _map_args(args):
-    frac, mean, sigma, lam, mean_t, sigma_t = args
-    alpha_ts = (mean_t**2) / (sigma_t**2)
-    beta_ts = mean_t / (sigma_t**2)
-    k = (mean / sigma) ** 2
-    theta = mean / k
-    mu = lam * alpha_ts * mean / beta_ts
-    p = 1 + 1 / (alpha_ts + 1)
-    phi = (alpha_ts + 1) * pow(lam * alpha_ts, 1 - p) / pow(beta_ts / mean, 2 - p)
-    return (frac, k, theta, mu, p, phi)
+# ==============================
+#     Constants
+# ==============================
+
+SEED = 42
+N_EVENTS = 100_000
+XI = 0.4  # Gen-Poisson dispersion
+
+PED_MEAN = -600.0
+PED_SIGMA = 100.0
+SPE_MEAN = 6000.0
+SPE_SIGMA = 1000.0
 
 
-def split_and_sum_compact(samples, pes):
-    pes = np.array(pes)
-    assert samples.shape[0] == pes.sum()
-    idxs = np.nonzero(pes)[0]
-    result = []
+# ==============================
+#     Poisson sampling
+# ==============================
+
+
+def sample_poisson_tweedie(
+    n_events, lam, ped_mean, ped_sigma, spe_mean, spe_sigma, seed=None
+):
+    """Draw n_events charges from the Compound-Poisson-Gamma model.
+
+    Each event:
+      - Draw k ~ Poisson(lam)
+      - charge ~ N(ped_mean, ped_sigma^2) + sum of k independent Gamma SPE draws
+
+    Parameters
+    ----------
+    n_events  : int
+    lam       : float   light intensity = -log(1 - occ)
+    ped_mean  : float
+    ped_sigma : float
+    spe_mean  : float   mean of single Gamma SPE
+    spe_sigma : float   std  of single Gamma SPE
+    seed      : int or None
+
+    Returns
+    -------
+    charges : ndarray, shape (n_events,)
+    ks      : ndarray, shape (n_events,)   PE counts per event
+    """
+    rng = np.random.default_rng(seed)
+    alpha = (spe_mean / spe_sigma) ** 2
+    theta = spe_mean / alpha
+
+    ks = rng.poisson(lam, size=n_events)
+    charges = rng.normal(ped_mean, ped_sigma, size=n_events)
+
+    nonzero = np.where(ks > 0)[0]
+    total_spe = int(ks[nonzero].sum())
+    spe_draws = rng.gamma(shape=alpha, scale=theta, size=total_spe)
+
     idx = 0
-    for i in idxs:
-        count = pes[i]
-        result.append(samples[idx : idx + count].sum())
-        idx += count
-    return np.array(result)
+    for i, k in zip(nonzero, ks[nonzero]):
+        charges[i] += spe_draws[idx : idx + k].sum()
+        idx += k
+
+    return charges, ks
 
 
-def sample_from_ped(n, args, seed):
-    mean, sigma = args
-    return norm.rvs(loc=mean, scale=sigma, size=n, random_state=seed)
+# ==============================
+#     Gen-Poisson sampling
+# ==============================
 
 
-def sample_from_spe(n, args, seed):
-    frac, k, theta, mu, p, phi = _map_args(args)
-    samples = bernoulli.rvs(
-        p=frac, size=n, random_state=seed
-    )  # 1 from gamma, 0 from tweedie
-    gamma_samples = sum(samples)
-    tweedie_samples = n - gamma_samples
-    gamma_rvs = gamma.rvs(a=k, scale=theta, size=gamma_samples, random_state=seed)
-    tweedie_rvs = tweedie.rvs(
-        mu=mu, p=p, phi=phi, size=tweedie_samples, random_state=seed
+def _gen_poisson_pmf(lam, xi, k_max=50):
+    """Generalized Poisson PMF up to k_max, normalised.
+
+    p_k = lam * (lam + xi*k)^{k-1} * exp(-lam - xi*k) / k!
+    p_0 = exp(-lam)
+    """
+    ks = np.arange(0, k_max + 1, dtype=float)
+    logp = np.where(
+        ks == 0,
+        -lam,
+        np.log(lam)
+        + (ks - 1) * np.log(np.maximum(lam + xi * ks, 1e-300))
+        - lam
+        - xi * ks
+        - np.array([float(np.sum(np.log(np.arange(1, int(k) + 1)))) for k in ks]),
     )
-    all_rvs = np.zeros_like(samples)
-    all_rvs[samples.astype(bool)] = gamma_rvs
-    all_rvs[~samples.astype(bool)] = tweedie_rvs
-    return all_rvs
+    p = np.exp(logp - logp.max())
+    p = np.maximum(p, 0.0)
+    return p / p.sum()
 
 
-def sample_from_pe(n, args, occ, seed):
-    mu = -np.log(1 - occ)
-    print(f"mu = {mu:.2f} equals occupancy = {occ}")
-    pes = poisson.rvs(mu, size=n, random_state=seed)
+def sample_genpoisson_tweedie(
+    n_events, lam, xi, ped_mean, ped_sigma, spe_mean, spe_sigma, seed=None
+):
+    """Draw n_events charges from the Compound-Generalized-Poisson-Gamma model.
 
-    nonZeroPEs = sum(pes)
-    nonZeroSamples = sample_from_spe(nonZeroPEs, args[2:], seed)
-    zeroSamples = sample_from_ped(sum(pes == 0), args[:2], seed)
-    nonZeroRes = split_and_sum_compact(nonZeroSamples, pes)
-    return nonZeroRes[nonZeroRes != 0]
+    Parameters
+    ----------
+    n_events  : int
+    lam       : float   light intensity = -log(1 - occ)
+    xi        : float   Gen-Poisson dispersion parameter (0 = plain Poisson)
+    ped_mean  : float
+    ped_sigma : float
+    spe_mean  : float
+    spe_sigma : float
+    seed      : int or None
 
-
-# ===============
-#    Recursive
-# ===============
-
-
-def _map_args_recursive(args):
-    frac, mean, sigma, lam, lam_r, mean_r, sigma_r = args
-    k = (mean / sigma) ** 2
-    theta = mean / k
-    k_r = (mean_r / sigma_r) ** 2
-    theta_r = mean * (sigma_r**2) / mean_r
-    return (frac, k, theta, lam, lam_r, k_r, theta_r)
-
-
-def _sample_s_batch_recursive(rng, m, w, lam2, k2, theta2):
-    if m == 0:
-        return np.zeros(0, dtype=float)
-
-    charge = np.zeros(m, dtype=float)
-    active = np.ones(m, dtype=np.int64)
-
-    while True:
-        alive_mask = active > 0
-        if not np.any(alive_mask):
-            break
-
-        a = active[alive_mask]
-        direct = rng.binomial(a, w)
-        spawn = a - direct
-
-        nz = direct > 0
-        if np.any(nz):
-            idxs = np.where(alive_mask)[0][nz]
-            for i, d in zip(idxs, direct[nz]):
-                charge[i] += rng.gamma(shape=k2 * d, scale=theta2)
-
-        children = np.zeros_like(a)
-        nzs = spawn > 0
-        if np.any(nzs):
-            children[nzs] = rng.poisson(lam2 * spawn[nzs])
-
-        active[alive_mask] = children
-
-    return charge
-
-
-def _sample_S_batch_recursive(rng, m, w, k1, theta1, lam1, lam2, k2, theta2):
-    if m == 0:
-        return np.zeros(0, dtype=float)
-
-    out = np.zeros(m, dtype=float)
-    u = rng.random(m)
-    direct_mask = u < w
-    rec_mask = ~direct_mask
-
-    nd = int(np.sum(direct_mask))
-    if nd > 0:
-        out[direct_mask] = rng.gamma(shape=k1, scale=theta1, size=nd)
-
-    nr = int(np.sum(rec_mask))
-    if nr > 0:
-        K = rng.poisson(lam1, size=nr)
-        tot_s = int(np.sum(K))
-        if tot_s > 0:
-            s_all = _sample_s_batch_recursive(rng, tot_s, w, lam2, k2, theta2)
-            owner = np.repeat(np.arange(nr), K)
-            sums = np.bincount(owner, weights=s_all, minlength=nr)
-            out[rec_mask] = sums
-
-    return out
-
-
-def sample_from_spe_recursive(n, args, seed):
+    Returns
+    -------
+    charges : ndarray, shape (n_events,)
+    ks      : ndarray, shape (n_events,)   PE counts per event
+    """
     rng = np.random.default_rng(seed)
-    w, k1, theta1, lam1, lam2, k2, theta2 = _map_args_recursive(args)
-    if (1.0 - w) * lam2 >= 1.0:
-        raise ValueError("(1-w)*lam2 must be < 1 for finite mean in recursive sampler.")
+    alpha = (spe_mean / spe_sigma) ** 2
+    theta = spe_mean / alpha
 
-    return _sample_S_batch_recursive(rng, n, w, k1, theta1, lam1, lam2, k2, theta2)
+    pmf = _gen_poisson_pmf(lam, xi, k_max=50)
+    ks = rng.choice(len(pmf), size=n_events, p=pmf)
 
+    charges = rng.normal(ped_mean, ped_sigma, size=n_events)
 
-def sample_from_pe_recursive(n_events, args, occ, seed):
-    rng = np.random.default_rng(seed)
-    mu = -np.log(1.0 - occ)
-    N = rng.poisson(mu, size=n_events)
+    nonzero = np.where(ks > 0)[0]
+    total_spe = int(ks[nonzero].sum())
+    spe_draws = rng.gamma(shape=alpha, scale=theta, size=total_spe)
 
-    tot = int(np.sum(N))
-    if tot == 0:
-        return np.zeros(0, dtype=float)
+    idx = 0
+    for i, k in zip(nonzero, ks[nonzero]):
+        charges[i] += spe_draws[idx : idx + k].sum()
+        idx += k
 
-    S_all = sample_from_spe_recursive(tot, args, seed)
-    owners = np.repeat(np.arange(n_events), N)
-    Q = np.bincount(owners, weights=S_all, minlength=n_events)
-    return Q[Q != 0.0]
+    return charges, ks

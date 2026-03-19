@@ -1,6 +1,6 @@
 import math
+
 import numpy as np
-import pandas as pd
 import matplotlib.pyplot as plt
 
 
@@ -24,6 +24,8 @@ def plot_histogram_with_fit(
     zero=None,
     zeroReal=None,
     ys=None,
+    comp_colors=None,
+    comp_styles=None,
     logscale=False,
     ax_main=None,
     ax_resid=None,
@@ -34,27 +36,28 @@ def plot_histogram_with_fit(
 
     bin_centers = (bins[:-1] + bins[1:]) / 2
 
-    # If occupancy is very small (< 0.01), use scientific notation
-    if occ < 0.01:
-        exponent = int(np.floor(np.log10(occ)))
+    # ==============================
+    #     Occupancy label
+    # ==============================
+
+    if occ is not None and occ < 0.01:
+        exp = int(np.floor(np.log10(occ)))
         mu = -math.log1p(-occ)
         mu_std = occ_std / (1.0 - occ)
-        mantissa = mu / 10**exponent
-        mantissa_std = mu_std / 10**exponent
-        occ_str = rf"({mantissa:.3f}$\pm${mantissa_std:.3f})$\times10^{exponent}$"
-    else:
-        # occ_str = rf"{occ:.2%}$\pm${occ_std:.2%}"
+        occ_str = rf"({mu/10**exp:.3f}$\pm${mu_std/10**exp:.3f})" rf"$\times10^{exp}$"
+    elif occ is not None:
         mu = -math.log1p(-occ)
         mu_std = occ_std / (1.0 - occ)
         occ_str = rf"{mu:.3f}$\pm${mu_std:.3f}"
+    else:
+        occ_str = ""
+
+    # ==============================
+    #     Histogram
+    # ==============================
 
     ax_main.stairs(
-        hist,
-        bins,
-        fill=True,
-        color="C0",
-        alpha=0.2,
-        label=f"$\mu$ = {occ_str}",
+        hist, bins, fill=True, color="C0", alpha=0.2, label=rf"$\mu$ = {occ_str}"
     )
     ax_main.errorbar(
         bin_centers,
@@ -67,12 +70,21 @@ def plot_histogram_with_fit(
         mfc="red",
         ms=3,
     )
+
+    # ==============================
+    #     Overall fit curve
+    # ==============================
+
     ax_main.plot(
         xsp,
         smooth,
         color="red",
-        label=(f"$\chi^2$/ndf = {chiSq:.2f}/{ndf}" if chiSq is not None else "fit"),
+        label=(f"$\\chi^2$/ndf = {chiSq:.2f}/{ndf}" if chiSq is not None else "fit"),
     )
+
+    # ==============================
+    #     Gain marker
+    # ==============================
 
     if len(params) == 6 and gp is not None:
         ax_main.axvline(
@@ -81,7 +93,7 @@ def plot_histogram_with_fit(
             linestyle="--",
             alpha=0.7,
             label=(
-                f"Gp={gp:.2f}$\pm${gp_std:.2f}"
+                f"Gp={gp:.2f}$\\pm${gp_std:.2f}"
                 if gp_std is not None
                 else f"Gp={gp:.2f}"
             ),
@@ -92,7 +104,7 @@ def plot_histogram_with_fit(
             linestyle="--",
             alpha=0.7,
             label=(
-                f"Gm={gm:.2f}$\pm${gm_std:.2f}"
+                f"Gm={gm:.2f}$\\pm${gm_std:.2f}"
                 if gm_std is not None
                 else f"Gm={gm:.2f}"
             ),
@@ -104,42 +116,64 @@ def plot_histogram_with_fit(
             linestyle="--",
             alpha=0.7,
             label=(
-                f"G={gm:.2f}$\pm${gm_std:.2f}" if gm_std is not None else f"G={gm:.2f}"
+                f"G={gm:.2f}$\\pm${gm_std:.2f}" if gm_std is not None else f"G={gm:.2f}"
             ),
         )
 
-    for comp, _ in zip(comps, labels):
-        ax_main.plot(xsp, comp, color="black", alpha=0.6, linestyle="--")
+    # ==============================
+    #     Per-PE components
+    # ==============================
 
-    # xmin, xmax = ax_main.get_xlim()
-    # ymin, ymax = ax_main.get_ylim()
+    _default_colors = [
+        "#888888",
+        "#2196F3",
+        "#4CAF50",
+        "#FF9800",
+        "#E91E63",
+        "#9C27B0",
+        "#00BCD4",
+        "#FF5722",
+    ]
+    _default_styles = ["--", "-.", ":", (0, (3, 1, 1, 1)), "--", "-.", ":"]
 
-    # if zero is not None:
-    #     ax_main.scatter(0, zero, label=f"0 PE (fit): {zero:.0f}")
-    # if zeroReal is not None:
-    #     ax_main.scatter(0, zeroReal, label=f"0 PE (true): {zeroReal}")
+    colors = comp_colors if comp_colors is not None else _default_colors
+    styles = comp_styles if comp_styles is not None else _default_styles
 
-    # ax_main.set_xlim(xmin, xmax)
-    # ax_main.set_ylim(ymin, ymax)
+    for i, (comp, lbl) in enumerate(zip(comps, labels)):
+        ax_main.plot(
+            xsp,
+            comp,
+            color=colors[i % len(colors)],
+            linestyle=styles[i % len(styles)],
+            alpha=0.8,
+            label=lbl,
+        )
+
+    # ==============================
+    #     Axes formatting
+    # ==============================
 
     if logscale:
         ax_main.set_yscale("log")
 
     ax_main.grid(True, which="both", linestyle="--", alpha=0.3)
     ax_main.set_ylabel("Entries")
-    ax_main.set_xlabel("Q")
+    ax_main.legend(frameon=False)
     if ch is not None:
         ax_main.set_title(f"ch {ch}")
-    ax_main.legend(frameon=False)
 
-    # plot residual if ax_resid
-    if ax_resid is not None:
-        residuals = hist - ys
+    # ==============================
+    #     Residual panel
+    # ==============================
+
+    if ax_resid is not None and ys is not None:
         ax_resid.axhline(0, color="gray", linewidth=1, linestyle="--")
-        ax_resid.plot(bin_centers, residuals, "o", color="black", ms=3)
+        ax_resid.plot(bin_centers, hist - ys, "o", color="black", ms=3)
         ax_resid.grid(True, which="both", linestyle="--", alpha=0.3)
         ax_resid.set_ylabel("Residual")
         ax_resid.set_xlabel("Q")
         ax_main.label_outer()
+    else:
+        ax_main.set_xlabel("Q")
 
     return fig, ax_main, ax_resid
