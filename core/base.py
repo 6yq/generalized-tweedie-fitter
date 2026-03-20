@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 import numpy as np
 
 from math import log, exp
@@ -477,6 +478,9 @@ class PMT_Fitter:
             full, modified_neyman_chi2_B, self.dof
         )
         self.chi_sq_mighell, _ = self.get_chi_sq(full, mighell_chi2, self.dof)
+
+        self.aic = 2 * self.dof - 2 * self.likelihood
+        self.bic = self.dof * np.log(self.A) - 2 * self.likelihood
 
         for name, v, e in zip(
             self.extra_param_names(), self.extra_args, self.extra_args_std
