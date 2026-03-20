@@ -1,5 +1,4 @@
 import math
-
 import numpy as np
 import matplotlib.pyplot as plt
 
@@ -29,6 +28,7 @@ def plot_histogram_with_fit(
     logscale=False,
     ax_main=None,
     ax_resid=None,
+    ax_leg=None,
     fig=None,
 ):
     if ax_main is None:
@@ -125,7 +125,6 @@ def plot_histogram_with_fit(
     # ==============================
 
     _default_colors = [
-        "#888888",
         "#2196F3",
         "#4CAF50",
         "#FF9800",
@@ -134,20 +133,21 @@ def plot_histogram_with_fit(
         "#00BCD4",
         "#FF5722",
     ]
-    _default_styles = ["--", "-.", ":", (0, (3, 1, 1, 1)), "--", "-.", ":"]
+    _default_styles = ["-.", ":", "--", "-.", ":", "--", "-."]
 
     colors = comp_colors if comp_colors is not None else _default_colors
     styles = comp_styles if comp_styles is not None else _default_styles
 
+    comp_handles = []
     for i, (comp, lbl) in enumerate(zip(comps, labels)):
-        ax_main.plot(
+        (line,) = ax_main.plot(
             xsp,
             comp,
             color=colors[i % len(colors)],
             linestyle=styles[i % len(styles)],
             alpha=0.8,
-            label=lbl,
         )
+        comp_handles.append((line, lbl))
 
     # ==============================
     #     Axes formatting
@@ -158,9 +158,23 @@ def plot_histogram_with_fit(
 
     ax_main.grid(True, which="both", linestyle="--", alpha=0.3)
     ax_main.set_ylabel("Entries")
-    ax_main.legend(frameon=False)
     if ch is not None:
         ax_main.set_title(f"ch {ch}")
+
+    # main legend: mu, chi2, G only
+    ax_main.legend(frameon=False, loc="upper right")
+
+    # PE component legend: 3 columns in dedicated axes below residual
+    if comp_handles:
+        handles, labels_ = zip(*comp_handles)
+        leg_target = ax_leg if ax_leg is not None else ax_main
+        leg_target.legend(
+            handles,
+            labels_,
+            ncol=3,
+            frameon=False,
+            loc="center",
+        )
 
     # ==============================
     #     Residual panel
@@ -170,7 +184,7 @@ def plot_histogram_with_fit(
         ax_resid.axhline(0, color="gray", linewidth=1, linestyle="--")
         ax_resid.plot(bin_centers, hist - ys, "o", color="black", ms=3)
         ax_resid.grid(True, which="both", linestyle="--", alpha=0.3)
-        ax_resid.set_ylabel("Residual")
+        ax_resid.set_ylabel("Res.")
         ax_resid.set_xlabel("Q")
         ax_main.label_outer()
     else:
