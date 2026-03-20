@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import numpy as np
 
 from math import log, exp
@@ -271,8 +270,9 @@ class PMT_Fitter:
                     if self._start_idx > 0 and extra.size > 0
                     else np.zeros_like(self.xsp)
                 )
+            b_sp = self._b_sp(a)
             ft = self._ser_to_ft(ser_args) + self.const(ser_args)
-            return self._ifft_pipeline(self._nPE_processor(lam, n)(ft))
+            return self._ifft_pipeline(self._nPE_processor(lam, n)(ft) * b_sp)
 
         return pdf_sr_n
 
