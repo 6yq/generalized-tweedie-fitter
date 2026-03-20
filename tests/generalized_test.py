@@ -27,7 +27,7 @@ plt.style.use("tests/matplotlibrc")
 BIN_WIDTH = 100.0
 BIN_LO = 1000.0
 BIN_HI = 50000.0
-LAM = 0.7
+LAMS = [0.5, 0.8, 1.5, 2.0, 3.0]
 
 
 # ==============================
@@ -60,8 +60,18 @@ _COMP_COLORS = [
 _COMP_STYLES = ["-.", ":", "--", "-.", ":", "--", "-."]
 
 
-def _n_max(lam):
-    return int(2.75 + 3 * lam)
+def _n_max(lam, threshold=0.01):
+    """Largest n where p_n >= threshold * p_mode."""
+    from math import exp, factorial
+
+    mode = max(0, int(lam))
+    p_mode = exp(-lam) * lam**mode / factorial(mode)
+    n = mode
+    while True:
+        n += 1
+        p_n = exp(-lam) * lam**n / factorial(n)
+        if p_n < threshold * p_mode:
+            return n - 1
 
 
 def _build_hist(charges):
@@ -75,25 +85,23 @@ def _build_hist(charges):
 # ==============================
 
 
-def fit_and_plot_genpoisson(charges, pp):
+def fit_and_plot_genpoisson(charges, lam, pp):
     hist, bins = _build_hist(charges)
+    bin_centers = (bins[:-1] + bins[1:]) / 2
 
     fit = Gen_Tweedie_Fitter(
         hist=hist,
         bins=bins,
         A=N_EVENTS,
-        lam_init=LAM,
+        lam_init=lam,
+        q_min=charges.min(),
         auto_init=True,
         seterr="ignore",
     )
-    fit.fit(tol=1e-3, max_calls=20000)
+    fit.fit(tol=1e-3, max_calls=10000)
 
     n_max = _n_max(fit.lam)
     comps, lbls = _npe_components(fit, n_max)
-
-    n_max = _n_max(fit.lam)
-    comps, lbls = _npe_components(fit, n_max)
-    bin_centers = (bins[:-1] + bins[1:]) / 2
 
     fig, ax_main, ax_resid = _make_figure()
     plot_histogram_with_fit(
@@ -118,7 +126,9 @@ def fit_and_plot_genpoisson(charges, pp):
         ax_resid=ax_resid,
         fig=fig,
     )
-    ax_main.set_title("Generalized Tweedie (Gen-Poisson)")
+    ax_main.set_title(
+        f"Generalized Tweedie (Gen-Poisson)  $\\lambda_{{\\rm true}}={lam}$"
+    )
     pp.savefig(fig)
     plt.close(fig)
 
@@ -129,12 +139,12 @@ def fit_and_plot_genpoisson(charges, pp):
 
 
 def main():
-    charges, _ = sample_genpoisson_tweedie(
-        N_EVENTS, LAM, XI, PED_MEAN, PED_SIGMA, SPE_MEAN, SPE_SIGMA, seed=SEED
-    )
-
     with PdfPages("fit_generalized_tweedie.pdf") as pp:
-        fit_and_plot_genpoisson(charges, pp)
+        for lam in LAMS:
+            charges, _ = sample_genpoisson_tweedie(
+                N_EVENTS, lam, XI, PED_MEAN, PED_SIGMA, SPE_MEAN, SPE_SIGMA, seed=SEED
+            )
+            fit_and_plot_genpoisson(charges, lam, pp)
 
 
 if __name__ == "__main__":

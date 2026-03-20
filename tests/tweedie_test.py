@@ -2,6 +2,7 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+from tqdm import tqdm
 from matplotlib.backends.backend_pdf import PdfPages
 
 from ..models import Tweedie_Fitter
@@ -26,7 +27,7 @@ plt.style.use("tests/matplotlibrc")
 BIN_WIDTH = 100.0
 BIN_LO = 1000.0
 BIN_HI = 50000.0
-LAM = 0.7
+LAMS = [0.5, 0.8, 1.5, 2.0, 3.0]
 
 
 # ==============================
@@ -34,10 +35,28 @@ LAM = 0.7
 # ==============================
 
 
-def _make_figure():
-    fig = plt.figure()
-    gs = fig.add_gridspec(2, 1, height_ratios=[0.85, 0.15], hspace=0.05)
-    return fig, fig.add_subplot(gs[0]), fig.add_subplot(gs[1])
+def _make_figure(n_comps=4):
+    # legend rows needed for 3-column layout
+    n_leg_rows = (n_comps + 2) // 3
+    # each legend row ~0.04 in height ratio units; residual fixed at 0.10
+    leg_ratio = n_leg_rows * 0.06
+    resid_ratio = 0.10
+    main_ratio = 1.0 - leg_ratio - resid_ratio
+    # expand figure height proportionally so main plot stays a good size
+    fig_height = 6 + n_leg_rows * 0.35
+
+    fig = plt.figure(figsize=(plt.rcParams["figure.figsize"][0], fig_height))
+    gs = fig.add_gridspec(
+        3,
+        1,
+        height_ratios=[main_ratio, resid_ratio, leg_ratio],
+        hspace=0.05,
+    )
+    ax_main = fig.add_subplot(gs[0])
+    ax_resid = fig.add_subplot(gs[1], sharex=ax_main)
+    ax_leg = fig.add_subplot(gs[2])
+    ax_leg.axis("off")
+    return fig, ax_main, ax_resid, ax_leg
 
 
 def _npe_components(fit, n_max):
@@ -59,8 +78,18 @@ _COMP_COLORS = [
 _COMP_STYLES = ["-.", ":", "--", "-.", ":", "--", "-."]
 
 
-def _n_max(lam):
-    return int(2.75 + 3 * lam)
+def _n_max(lam, threshold=0.01):
+    """Largest n where p_n >= threshold * p_mode."""
+    from math import exp, factorial
+
+    mode = max(0, int(lam))
+    p_mode = exp(-lam) * lam**mode / factorial(mode)
+    n = mode
+    while True:
+        n += 1
+        p_n = exp(-lam) * lam**n / factorial(n)
+        if p_n < threshold * p_mode:
+            return n - 1
 
 
 def _build_hist(charges):
@@ -74,14 +103,16 @@ def _build_hist(charges):
 # ==============================
 
 
-def fit_and_plot_poisson(charges, pp):
+def fit_and_plot_poisson(charges, lam, pp):
     hist, bins = _build_hist(charges)
+    bin_centers = (bins[:-1] + bins[1:]) / 2
 
     fit = Tweedie_Fitter(
         hist=hist,
         bins=bins,
         A=N_EVENTS,
-        lam_init=LAM,
+        lam_init=lam,
+        q_min=charges.min(),
         auto_init=True,
         seterr="ignore",
     )
@@ -90,11 +121,7 @@ def fit_and_plot_poisson(charges, pp):
     n_max = _n_max(fit.lam)
     comps, lbls = _npe_components(fit, n_max)
 
-    n_max = _n_max(fit.lam)
-    comps, lbls = _npe_components(fit, n_max)
-    bin_centers = (bins[:-1] + bins[1:]) / 2
-
-    fig, ax_main, ax_resid = _make_figure()
+    fig, ax_main, ax_resid, ax_leg = _make_figure(n_comps=len(comps))
     plot_histogram_with_fit(
         bins=bins,
         hist=hist,
@@ -115,9 +142,10 @@ def fit_and_plot_poisson(charges, pp):
         logscale=False,
         ax_main=ax_main,
         ax_resid=ax_resid,
+        ax_leg=ax_leg,
         fig=fig,
     )
-    ax_main.set_title("Tweedie (Poisson)")
+    ax_main.set_title(f"Tweedie (Poisson)  $\\lambda_{{\\rm true}}={lam}$")
     pp.savefig(fig)
     plt.close(fig)
 
@@ -128,12 +156,12 @@ def fit_and_plot_poisson(charges, pp):
 
 
 def main():
-    charges, _ = sample_poisson_tweedie(
-        N_EVENTS, LAM, PED_MEAN, PED_SIGMA, SPE_MEAN, SPE_SIGMA, seed=SEED
-    )
-
     with PdfPages("fit_tweedie.pdf") as pp:
-        fit_and_plot_poisson(charges, pp)
+        for lam in tqdm(LAMS, desc="Fitting multiple intensities"):
+            charges, _ = sample_poisson_tweedie(
+                N_EVENTS, lam, PED_MEAN, PED_SIGMA, SPE_MEAN, SPE_SIGMA, seed=SEED
+            )
+            fit_and_plot_poisson(charges, lam, pp)
 
 
 if __name__ == "__main__":
