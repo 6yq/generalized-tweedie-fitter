@@ -265,7 +265,8 @@ def compute_init(hist, edges):
 
     tf1.SetParLimits(0, ped_mean_rough - 400, ped_mean_rough + 400)
     tf1.SetParLimits(1, G_rough * 0.3, G_rough * 2.0)
-    # sigma_G and sigma_0 are free — no SetParLimits
+    tf1.SetParLimits(2, 0, 1e03)
+    tf1.SetParLimits(3, 0, 1e04)
     tf1.SetParLimits(4, 0.01, 0.97)  # w1
     tf1.SetParLimits(5, 0.01, 0.97)  # w2
     tf1.SetParLimits(6, 0.01, 0.97)  # w3
