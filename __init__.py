@@ -1,10 +1,17 @@
-from .core.base import PMT_Fitter
-from .core.combined import CombinedFitter
+from .core import (
+    merged_pearson_chi2,
+    modified_neyman_chi2_A,
+    modified_neyman_chi2_B,
+    mighell_chi2,
+    ExtraParam,
+)
+from .models import (
+    Tweedie_Fitter,
+    Gen_Tweedie_Fitter,
+)
+from .tests import (
+    plot_channel,
+    plot_histogram_with_fit,
+)
 
-from .models import Tweedie_Fitter, Gen_Tweedie_Fitter
-
-__all__ = [
-    "Tweedie_Fitter",
-    "Gen_Tweedie_Fitter",
-    "CombinedFitter",
-]
+__all__ = [...]
