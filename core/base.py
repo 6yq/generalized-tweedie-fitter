@@ -123,7 +123,7 @@ class PMT_Fitter:
 
         self._bin_width = float(self.bins[1] - self.bins[0])
         self._xsp_width = self._bin_width / self.sample
-        _q_min = float(q_min) if q_min is not None else float(self.bins[0])
+        _q_min = float(q_min) if q_min is not None else -10000
         self._shift = int(np.ceil((self.bins[0] - _q_min) / self._xsp_width))
 
         self.xsp = np.linspace(
