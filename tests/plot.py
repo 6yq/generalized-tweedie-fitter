@@ -35,8 +35,7 @@ def make_figure(n_comps=4):
     """Three-panel figure: main / residual / PE-legend row."""
     n_leg_rows = (n_comps + 2) // 3
     leg_ratio = n_leg_rows * 0.06
-    resid_ratio = 0.10
-    main_ratio = 1.0 - leg_ratio - resid_ratio
+    main_ratio, resid_ratio = 0.85, 0.15
     fig_height = 6 + n_leg_rows * 0.35
 
     fig = plt.figure(figsize=(plt.rcParams["figure.figsize"][0], fig_height))
@@ -215,7 +214,7 @@ def plot_histogram_with_fit(
             else ""
         )
         eta_line = (
-            f"$\\eta={spe_res:.1f}\\pm{spe_res_std:.1f}\%$"
+            f"$\\eta={spe_res:.2f}\\pm{spe_res_std:.2f}\%$"
             if spe_res is not None
             else ""
         )
@@ -253,7 +252,10 @@ def plot_histogram_with_fit(
     ax_main.legend(
         frameon=False,
         loc="upper right",
-        labelspacing=0.5,
+        bbox_to_anchor=(0.98, 0.98),
+        labelspacing=0.4,
+        handlelength=2.2,
+        borderaxespad=0.2,
         prop={"size": plt.rcParams["legend.fontsize"] * fs_scale},
     )
 
@@ -263,9 +265,13 @@ def plot_histogram_with_fit(
         leg_target.legend(
             handles,
             labels_,
-            ncol=3,
+            ncol=min(3, len(handles)),
             frameon=False,
             loc="center",
+            columnspacing=4.0,
+            handlelength=2.0,
+            handletextpad=0.5,
+            borderaxespad=0.0,
             prop={"size": plt.rcParams["legend.fontsize"] * fs_scale},
         )
 
