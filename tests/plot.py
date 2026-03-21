@@ -84,8 +84,9 @@ def plot_channel(fit, hist, bins, ch_id, pp, logscale=False):
         params=fit.ser_args,
         occ=1 - np.exp(-fit.lam),
         occ_std=fit.lam_std * np.exp(-fit.lam),
-        gm=fit.extra_args[0] + fit.gms,
-        gm_std=fit.ser_args_std[0],
+        ped_mean=fit.extra_args[0],
+        gm=spe_mean,
+        gm_std=spe_mean_std,
         spe_sigma=spe_sigma,
         spe_sigma_std=spe_sigma_std,
         spe_res=spe_res,
@@ -125,6 +126,7 @@ def plot_histogram_with_fit(
     ch=None,
     gp=None,
     gp_std=None,
+    ped_mean=None,
     gm=None,
     gm_std=None,
     spe_sigma=None,
@@ -218,7 +220,9 @@ def plot_histogram_with_fit(
             else ""
         )
         gm_label = "\n".join(filter(None, [g_line, sigma_line, eta_line]))
-        ax_main.axvline(gm, color="gray", linestyle="--", alpha=0.7, label=gm_label)
+        ax_main.axvline(
+            gm + ped_mean, color="gray", linestyle="--", alpha=0.7, label=gm_label
+        )
 
     # ==============================
     #     Per-PE components (on bin_centers grid)
