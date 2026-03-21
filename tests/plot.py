@@ -30,7 +30,7 @@ COMP_STYLES = ["-.", ":", "--", "-.", ":", "--", "-.", ":", "--"]
 # ==============================
 
 
-def n_max(lam, threshold=0.01):
+def n_max(lam, threshold=5e-03):
     """Largest n where Poisson p_n >= threshold * p_mode."""
     mode = max(0, int(lam))
     p_mode = exp(-lam) * lam**mode / factorial(mode)
