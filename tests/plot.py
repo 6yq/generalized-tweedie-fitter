@@ -8,24 +8,6 @@ from math import exp, factorial
 
 
 # ==============================
-#     Component style registry
-# ==============================
-
-COMP_COLORS = [
-    "#2196F3",
-    "#4CAF50",
-    "#FF9800",
-    "#E91E63",
-    "#9C27B0",
-    "#00BCD4",
-    "#FF5722",
-    "#795548",
-    "#607D8B",
-]
-COMP_STYLES = ["-.", ":", "--", "-.", ":", "--", "-.", ":", "--"]
-
-
-# ==============================
 #     Layout helpers
 # ==============================
 
@@ -99,8 +81,6 @@ def plot_channel(fit, hist, bins, ch_id, pp, logscale=False):
         bin_centers=bin_centers,
         comps=comps,
         labels=lbls,
-        comp_colors=COMP_COLORS[: len(comps)],
-        comp_styles=COMP_STYLES[: len(comps)],
         params=fit.ser_args,
         occ=1 - np.exp(-fit.lam),
         occ_std=fit.lam_std * np.exp(-fit.lam),
@@ -158,8 +138,6 @@ def plot_histogram_with_fit(
     zero=None,
     zeroReal=None,
     ys=None,
-    comp_colors=None,
-    comp_styles=None,
     logscale=False,
     ax_main=None,
     ax_resid=None,
@@ -196,7 +174,7 @@ def plot_histogram_with_fit(
     # ==============================
 
     ax_main.stairs(
-        hist, bins, fill=True, color="C0", alpha=0.2, label=rf"$\mu={occ_str}$"
+        hist, bins, fill=True, color="gray", alpha=0.3, label=rf"$\mu={occ_str}$"
     )
     ax_main.errorbar(
         bin_centers,
@@ -246,17 +224,12 @@ def plot_histogram_with_fit(
     #     Per-PE components (on bin_centers grid)
     # ==============================
 
-    colors = comp_colors if comp_colors is not None else COMP_COLORS
-    styles = comp_styles if comp_styles is not None else COMP_STYLES
-
     comp_handles = []
     for i, (comp, lbl) in enumerate(zip(comps, labels)):
         (line,) = ax_main.plot(
             bin_centers,
             comp,
-            color=colors[i % len(colors)],
-            linestyle=styles[i % len(styles)],
-            alpha=0.8,
+            linestyle="--",
         )
         comp_handles.append((line, lbl))
 
