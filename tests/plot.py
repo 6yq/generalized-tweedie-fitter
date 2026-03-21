@@ -1,6 +1,136 @@
+#!/usr/bin/env python3
 import math
+
 import numpy as np
 import matplotlib.pyplot as plt
+
+from math import exp, factorial
+
+
+# ==============================
+#     Component style registry
+# ==============================
+
+COMP_COLORS = [
+    "#2196F3",
+    "#4CAF50",
+    "#FF9800",
+    "#E91E63",
+    "#9C27B0",
+    "#00BCD4",
+    "#FF5722",
+    "#795548",
+    "#607D8B",
+]
+COMP_STYLES = ["-.", ":", "--", "-.", ":", "--", "-.", ":", "--"]
+
+
+# ==============================
+#     Layout helpers
+# ==============================
+
+
+def n_max(lam, threshold=0.01):
+    """Largest n where Poisson p_n >= threshold * p_mode."""
+    mode = max(0, int(lam))
+    p_mode = exp(-lam) * lam**mode / factorial(mode)
+    n = mode
+    while True:
+        n += 1
+        p_n = exp(-lam) * lam**n / factorial(n)
+        if p_n < threshold * p_mode:
+            return n - 1
+
+
+def npe_components(fit, n_max_val):
+    """Per-bin count arrays and labels from 1PE up to n_max_val PE."""
+    comps = [fit.estimate_count_n(n) for n in range(1, n_max_val + 1)]
+    labels = [f"{n} PE" for n in range(1, n_max_val + 1)]
+    return comps, labels
+
+
+def make_figure(n_comps=4):
+    """Three-panel figure: main / residual / PE-legend row."""
+    n_leg_rows = (n_comps + 2) // 3
+    leg_ratio = n_leg_rows * 0.06
+    resid_ratio = 0.10
+    main_ratio = 1.0 - leg_ratio - resid_ratio
+    fig_height = 6 + n_leg_rows * 0.35
+
+    fig = plt.figure(figsize=(plt.rcParams["figure.figsize"][0], fig_height))
+    gs = fig.add_gridspec(
+        3,
+        1,
+        height_ratios=[main_ratio, resid_ratio, leg_ratio],
+    )
+    ax_main = fig.add_subplot(gs[0])
+    ax_resid = fig.add_subplot(gs[1], sharex=ax_main)
+    ax_leg = fig.add_subplot(gs[2])
+    ax_leg.axis("off")
+    return fig, ax_main, ax_resid, ax_leg
+
+
+def plot_channel(fit, hist, bins, ch_id, pp, logscale=False):
+    """Render one channel's fit result and append to PdfPages pp."""
+    bin_width = float(bins[1] - bins[0])
+    bin_centers = (bins[:-1] + bins[1:]) / 2
+    n = n_max(fit.lam)
+    comps, lbls = npe_components(fit, n)
+
+    fig, ax_main, ax_resid, ax_leg = make_figure(n_comps=len(comps))
+
+    xsp_plot = fit.xsp[abs(fit._shift) :]
+    smooth_plot = fit.smooth[abs(fit._shift) :]
+
+    spe_mean = float(fit.ser_args[0])
+    spe_mean_std = float(fit.ser_args_std[0])
+    spe_sigma = float(fit.ser_args[1])
+    spe_sigma_std = float(fit.ser_args_std[1])
+    spe_res = spe_sigma / spe_mean * 100.0
+    spe_res_std = spe_res * np.sqrt(
+        (spe_sigma_std / spe_sigma) ** 2 + (spe_mean_std / spe_mean) ** 2
+    )
+
+    plot_histogram_with_fit(
+        bins=bins,
+        hist=hist,
+        xsp=xsp_plot,
+        smooth=smooth_plot,
+        bin_centers=bin_centers,
+        comps=comps,
+        labels=lbls,
+        comp_colors=COMP_COLORS[: len(comps)],
+        comp_styles=COMP_STYLES[: len(comps)],
+        params=fit.ser_args,
+        occ=1 - np.exp(-fit.lam),
+        occ_std=fit.lam_std * np.exp(-fit.lam),
+        gm=fit.extra_args[0] + fit.gms,
+        gm_std=fit.ser_args_std[0],
+        spe_sigma=spe_sigma,
+        spe_sigma_std=spe_sigma_std,
+        spe_res=spe_res,
+        spe_res_std=spe_res_std,
+        chiSq=fit.chi_sq_neyman_B,
+        ndf=fit.ndf,
+        ys=fit.ys,
+        logscale=logscale,
+        ax_main=ax_main,
+        ax_resid=ax_resid,
+        ax_leg=ax_leg,
+        fig=fig,
+    )
+    ax_main.set_title(f"channel id {ch_id}")
+
+    if logscale:
+        ax_main.set_ylim(bottom=5e-3)
+
+    pp.savefig(fig)
+    plt.close(fig)
+
+
+# ==============================
+#     Core drawing function
+# ==============================
 
 
 def plot_histogram_with_fit(
@@ -11,11 +141,16 @@ def plot_histogram_with_fit(
     comps,
     labels,
     params,
+    bin_centers=None,
     ch=None,
     gp=None,
     gp_std=None,
     gm=None,
     gm_std=None,
+    spe_sigma=None,
+    spe_sigma_std=None,
+    spe_res=None,
+    spe_res_std=None,
     occ=None,
     occ_std=None,
     chiSq=None,
@@ -34,21 +169,25 @@ def plot_histogram_with_fit(
     if ax_main is None:
         fig, ax_main = plt.subplots()
 
-    bin_centers = (bins[:-1] + bins[1:]) / 2
+    # bin_centers for histogram points and comps; xsp for smooth curve only
+    if bin_centers is None:
+        bin_centers = (bins[:-1] + bins[1:]) / 2
 
     # ==============================
     #     Occupancy label
     # ==============================
 
     if occ is not None and occ < 0.01:
-        exp = int(np.floor(np.log10(occ)))
+        exp_ = int(np.floor(np.log10(occ)))
         mu = -math.log1p(-occ)
         mu_std = occ_std / (1.0 - occ)
-        occ_str = rf"({mu/10**exp:.3f}$\pm${mu_std/10**exp:.3f})" rf"$\times10^{exp}$"
+        occ_str = (
+            rf"$({mu/10**exp_:.3f}\pm{mu_std/10**exp_:.3f})$" rf"$\times10^{exp_}$"
+        )
     elif occ is not None:
         mu = -math.log1p(-occ)
         mu_std = occ_std / (1.0 - occ)
-        occ_str = rf"{mu:.3f}$\pm${mu_std:.3f}"
+        occ_str = rf"{mu:.3f}\pm{mu_std:.3f}"
     else:
         occ_str = ""
 
@@ -57,7 +196,7 @@ def plot_histogram_with_fit(
     # ==============================
 
     ax_main.stairs(
-        hist, bins, fill=True, color="C0", alpha=0.2, label=rf"$\mu$ = {occ_str}"
+        hist, bins, fill=True, color="C0", alpha=0.2, label=rf"$\mu={occ_str}$"
     )
     ax_main.errorbar(
         bin_centers,
@@ -72,76 +211,48 @@ def plot_histogram_with_fit(
     )
 
     # ==============================
-    #     Overall fit curve
+    #     Overall fit curve (smooth on xsp grid)
     # ==============================
 
     ax_main.plot(
         xsp,
         smooth,
         color="red",
-        label=(f"$\\chi^2$/ndf = {chiSq:.2f}/{ndf}" if chiSq is not None else "fit"),
+        label=(f"$\\chi^2/ndf={chiSq:.2f}/{ndf}$" if chiSq is not None else "fit"),
     )
 
     # ==============================
     #     Gain marker
     # ==============================
 
-    if len(params) == 6 and gp is not None:
-        ax_main.axvline(
-            gp,
-            color="gray",
-            linestyle="--",
-            alpha=0.7,
-            label=(
-                f"Gp={gp:.2f}$\\pm${gp_std:.2f}"
-                if gp_std is not None
-                else f"Gp={gp:.2f}"
-            ),
+    if gm is not None:
+        g_line = (
+            f"$G={gm:.2f}\\pm{gm_std:.2f}$" if gm_std is not None else f"G={gm:.2f}"
         )
-        ax_main.axvline(
-            gm,
-            color="gray",
-            linestyle="--",
-            alpha=0.7,
-            label=(
-                f"Gm={gm:.2f}$\\pm${gm_std:.2f}"
-                if gm_std is not None
-                else f"Gm={gm:.2f}"
-            ),
+        sigma_line = (
+            f"$\\sigma={spe_sigma:.2f}\\pm{spe_sigma_std:.2f}$"
+            if spe_sigma is not None
+            else ""
         )
-    elif gm is not None:
-        ax_main.axvline(
-            gm,
-            color="gray",
-            linestyle="--",
-            alpha=0.7,
-            label=(
-                f"G={gm:.2f}$\\pm${gm_std:.2f}" if gm_std is not None else f"G={gm:.2f}"
-            ),
+        eta_line = (
+            f"$\\eta={spe_res:.1f}\\pm{spe_res_std:.1f}\%$"
+            if spe_res is not None
+            else ""
         )
+        gm_label = "\n".join(filter(None, [g_line, sigma_line, eta_line]))
+        ax_main.axvline(gm, color="gray", linestyle="--", alpha=0.7, label=gm_label)
 
     # ==============================
-    #     Per-PE components
+    #     Per-PE components (on bin_centers grid)
     # ==============================
 
-    _default_colors = [
-        "#2196F3",
-        "#4CAF50",
-        "#FF9800",
-        "#E91E63",
-        "#9C27B0",
-        "#00BCD4",
-        "#FF5722",
-    ]
-    _default_styles = ["-.", ":", "--", "-.", ":", "--", "-."]
-
-    colors = comp_colors if comp_colors is not None else _default_colors
-    styles = comp_styles if comp_styles is not None else _default_styles
+    colors = comp_colors if comp_colors is not None else COMP_COLORS
+    styles = comp_styles if comp_styles is not None else COMP_STYLES
 
     comp_handles = []
     for i, (comp, lbl) in enumerate(zip(comps, labels)):
         (line,) = ax_main.plot(
-            xsp,
+            bin_centers,
             comp,
             color=colors[i % len(colors)],
             linestyle=styles[i % len(styles)],
@@ -159,12 +270,16 @@ def plot_histogram_with_fit(
     ax_main.grid(True, which="both", linestyle="--", alpha=0.3)
     ax_main.set_ylabel("Entries")
     if ch is not None:
-        ax_main.set_title(f"ch {ch}")
+        ax_main.set_title(f"channel id {ch}")
 
-    # main legend: mu, chi2, G only
-    ax_main.legend(frameon=False, loc="upper right")
+    fs_scale = 0.75
+    ax_main.legend(
+        frameon=False,
+        loc="upper right",
+        labelspacing=0.5,
+        prop={"size": plt.rcParams["legend.fontsize"] * fs_scale},
+    )
 
-    # PE component legend: 3 columns in dedicated axes below residual
     if comp_handles:
         handles, labels_ = zip(*comp_handles)
         leg_target = ax_leg if ax_leg is not None else ax_main
@@ -174,6 +289,7 @@ def plot_histogram_with_fit(
             ncol=3,
             frameon=False,
             loc="center",
+            prop={"size": plt.rcParams["legend.fontsize"] * fs_scale},
         )
 
     # ==============================
