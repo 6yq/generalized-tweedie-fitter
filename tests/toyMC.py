@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import numpy as np
 
 from scipy.stats import norm, gamma
@@ -10,7 +9,7 @@ from scipy.stats import norm, gamma
 
 SEED = 42
 N_EVENTS = 100_000
-XI = 0.4  # Gen-Poisson dispersion
+XI = 0.1  # Gen-Poisson dispersion
 
 PED_MEAN = -600.0
 PED_SIGMA = 100.0
