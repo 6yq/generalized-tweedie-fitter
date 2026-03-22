@@ -36,7 +36,8 @@ lines.linewidth : 2
 lines.markersize : 6.0
 
 # Set line style as well for black and white graphs
-axes.prop_cycle : cycler('color', ["3D505A","D65190","FF8C00","0076B9","4DAF4A","E87B1E","C098B2","F898CB","731A73","FFCB5B"])
+# axes.prop_cycle : cycler('color', ["3D505A","D65190","FF8C00","0076B9","4DAF4A","E87B1E","C098B2","F898CB","731A73","FFCB5B"])
+axes.prop_cycle : cycler('color', ['01569d', 'e9751d', 'dabb4e', '735634', '108280', 'f0e4ca', '4f8429', '7f6a67', 'b43c01', '343427'])
 
 # save config
 savefig.bbox : tight
