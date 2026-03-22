@@ -76,7 +76,7 @@ class Gen_Tweedie_Fitter(PMT_Fitter):
         Linear constraints on [spe_params..., lam].
     """
 
-    _DEFAULT_SPE_INIT = (1.0, 0.3, 0.5)
+    _DEFAULT_SPE_INIT = (1.0, 0.3, 0.1)
     _DEFAULT_SPE_BOUNDS = ((1e-6, None), (1e-6, None), (1e-6, 0.999))
     _DEFAULT_CONSTRAINTS = [
         {"coeffs": [(1, 1), (2, -1)], "threshold": 0, "op": ">"},
@@ -176,13 +176,38 @@ class Gen_Tweedie_Fitter(PMT_Fitter):
         """Solve T = s * exp(xi*(T-1)) via the principal branch of Lambert W.
 
         T(s) = -W(-xi * s * e^{-xi}) / xi
+
+        Note: s is complex (Fourier domain), so T is complex too.
+        The .real part is taken only after the final IFFT, not here.
         """
         xi = self._xi
-        return -lambertw(-xi * s * np.exp(-xi), k=0).real / xi
+        return -lambertw(-xi * s * np.exp(-xi), k=0) / xi
 
-    # ==============================
-    #     Pedestal PDF
-    # ==============================
+    def _make_nPE_processor(self):
+        """n-PE contribution using Generalized Poisson PMF.
+
+        p_k = lam * (lam + xi*k)^{k-1} * exp(-lam - xi*k) / k!   for k >= 1
+        p_0 = exp(-lam)
+        """
+        from math import exp as _exp, factorial as _fac, log as _log
+
+        def processor(lam, n):
+            if n == 0:
+                p_n = _exp(-lam)
+            else:
+                xi = self._xi
+                # log p_n for numerical stability
+                log_p = (
+                    _log(lam)
+                    + (n - 1) * _log(max(lam + xi * n, 1e-300))
+                    - lam
+                    - xi * n
+                    - sum(_log(k) for k in range(1, n + 1))
+                )
+                p_n = _exp(log_p)
+            return lambda s_sp: p_n * s_sp**n
+
+        return processor
 
     def _pdf_extra(self, extra_args):
         return norm.pdf(self.xsp, loc=float(extra_args[0]), scale=float(extra_args[1]))
