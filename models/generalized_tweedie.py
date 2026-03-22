@@ -91,7 +91,7 @@ class Gen_Tweedie_Fitter(PMT_Fitter):
         spe_bounds=None,
         lam_init=None,
         q_min=None,
-        pad_right=3.0,
+        pad_right=0.2,
         sample=None,
         seterr: str = "warn",
         fit_total: bool = True,
