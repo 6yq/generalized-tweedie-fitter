@@ -66,18 +66,6 @@ def _npe_components(fit, n_max):
     return comps, labels
 
 
-_COMP_COLORS = [
-    "#2196F3",
-    "#4CAF50",
-    "#FF9800",
-    "#E91E63",
-    "#9C27B0",
-    "#00BCD4",
-    "#FF5722",
-]
-_COMP_STYLES = ["-.", ":", "--", "-.", ":", "--", "-."]
-
-
 def _n_max(lam, threshold=0.01):
     """Largest n where p_n >= threshold * p_mode."""
     from math import exp, factorial
@@ -129,12 +117,11 @@ def fit_and_plot_poisson(charges, lam, pp):
         smooth=fit.ys,
         comps=comps,
         labels=lbls,
-        comp_colors=_COMP_COLORS[: len(comps)],
-        comp_styles=_COMP_STYLES[: len(comps)],
         params=fit.ser_args,
         occ=1 - np.exp(-fit.lam),
         occ_std=fit.lam_std * np.exp(-fit.lam),
-        gm=fit.extra_args[0] + fit.gms,
+        ped_mean=fit.extra_args[0],
+        gm=fit.ser_args[0],
         gm_std=fit.ser_args_std[0],
         chiSq=fit.chi_sq_neyman_B,
         ndf=fit.ndf,
@@ -145,7 +132,7 @@ def fit_and_plot_poisson(charges, lam, pp):
         ax_leg=ax_leg,
         fig=fig,
     )
-    ax_main.set_title(f"Tweedie (Poisson)  $\\lambda_{{\\rm true}}={lam}$")
+    ax_main.set_title(f"Tweedie $\\lambda_{{\\rm true}}={lam}$")
     pp.savefig(fig)
     plt.close(fig)
 
