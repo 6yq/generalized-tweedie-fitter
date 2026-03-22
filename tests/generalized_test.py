@@ -2,10 +2,17 @@
 import numpy as np
 import matplotlib.pyplot as plt
 
+from tqdm import tqdm
 from matplotlib.backends.backend_pdf import PdfPages
 
 from ..models import Gen_Tweedie_Fitter
 from .plot import plot_histogram_with_fit
+from .tweedie_test import (
+    _make_figure,
+    _npe_components,
+    _n_max,
+    _build_hist,
+)
 from .toyMC import (
     sample_genpoisson_tweedie,
     N_EVENTS,
@@ -15,12 +22,6 @@ from .toyMC import (
     SPE_MEAN,
     SPE_SIGMA,
     SEED,
-)
-from .tweedie_test import (
-    _make_figure,
-    _npe_components,
-    _n_max,
-    _build_hist,
 )
 
 plt.style.use("tests/matplotlibrc")
@@ -32,7 +33,7 @@ plt.style.use("tests/matplotlibrc")
 
 BIN_WIDTH = 100.0
 BIN_LO = 1000.0
-BIN_HI = 50000.0
+BIN_HI = 60000.0
 LAMS = [0.5, 0.8, 1.5, 2.0, 3.0]
 
 
@@ -42,7 +43,7 @@ LAMS = [0.5, 0.8, 1.5, 2.0, 3.0]
 
 
 def fit_and_plot_genpoisson(charges, lam, pp):
-    hist, bins = _build_hist(charges)
+    hist, bins = _build_hist(charges, BIN_LO, BIN_HI, BIN_WIDTH)
     bin_centers = (bins[:-1] + bins[1:]) / 2
 
     fit = Gen_Tweedie_Fitter(
@@ -94,7 +95,7 @@ def fit_and_plot_genpoisson(charges, lam, pp):
 
 def main():
     with PdfPages("fit_generalized_tweedie.pdf") as pp:
-        for lam in LAMS:
+        for lam in tqdm(LAMS, desc="Fitting multiple intensities"):
             charges, _ = sample_genpoisson_tweedie(
                 N_EVENTS, lam, XI, PED_MEAN, PED_SIGMA, SPE_MEAN, SPE_SIGMA, seed=SEED
             )

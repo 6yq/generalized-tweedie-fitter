@@ -80,9 +80,9 @@ def _n_max(lam, threshold=0.01):
             return n - 1
 
 
-def _build_hist(charges):
-    bins = np.arange(BIN_LO, BIN_HI + BIN_WIDTH, BIN_WIDTH)
-    hist, _ = np.histogram(charges[charges >= BIN_LO], bins=bins)
+def _build_hist(charges, bin_lo, bin_hi, bin_width):
+    bins = np.arange(bin_lo, bin_hi + bin_width, bin_width)
+    hist, _ = np.histogram(charges, bins=bins)
     return hist, bins
 
 
@@ -92,7 +92,7 @@ def _build_hist(charges):
 
 
 def fit_and_plot_poisson(charges, lam, pp):
-    hist, bins = _build_hist(charges)
+    hist, bins = _build_hist(charges, BIN_LO, BIN_HI, BIN_WIDTH)
     bin_centers = (bins[:-1] + bins[1:]) / 2
 
     fit = Tweedie_Fitter(
