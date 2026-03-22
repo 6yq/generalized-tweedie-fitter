@@ -1,4 +1,18 @@
+# ===========================================================================
 # core/combined.py
+#
+# Joint fitter for multiple spectra sharing one set of SER + pedestal params.
+#
+# Parameter vector layout:
+#   theta = [logA_1, ..., logA_N,        (independent, one per spectrum)
+#            extra_0, ..., extra_{S-1},   (shared pedestal, length _start_idx)
+#            spe_0,  ..., spe_{M-1},      (shared SER)
+#            lam_1,  ..., lam_N]          (independent, one per spectrum)
+#
+# All individual fitters must have identical _fit_total, _start_idx, and
+# SER dimension.  Shared parameters are taken from fitters[0].
+# ===========================================================================
+
 from __future__ import annotations
 
 import numpy as np
@@ -6,15 +20,13 @@ from typing import List
 
 
 class CombinedFitter:
-    """Combine multiple spectra into a joint fit with shared SER parameters.
+    """Combine multiple spectra into a joint fit with shared SER + pedestal.
 
-    Parameter structure:
-        theta = [logA_1, ..., logA_N (if fit_total), threshold_params (if threshold), shared_SER, occ_1, ..., occ_N]
-
-    - logA_i: optional, independent for each spectrum if fit_total=True
-    - threshold_params: optional, shared (pedestal or threshold effect params, length=_start_idx)
-    - shared_SER: shared SER parameters (same for all spectra)
-    - occ_i: independent occupancy for each spectrum i
+    Parameters
+    ----------
+    fitters : list of PMT_Fitter
+        Individual fitters, each already constructed with hist/bins/A/q_min.
+        Must all have the same _fit_total, _start_idx, and SER dimension.
     """
 
     def __init__(self, fitters: List[object]):
@@ -30,32 +42,34 @@ class CombinedFitter:
         print(f"[INFO] Combined {self.n_spectra} spectra", flush=True)
         print(f"[INFO] Total parameters: {self.dof}", flush=True)
 
+    # ==============================
+    #     Validation
+    # ==============================
+
     def _validate_fitters(self):
         ref = self.fitters[0]
-        ref_fit_total = ref._fit_total
-        ref_start_idx = ref._start_idx
-
-        # Calculate reference SER dimension
-        ref_head = 1 if ref_fit_total else 0
-        ref_ser_dim = len(ref.init) - ref_head - ref_start_idx - 1
+        ref_head = 1 if ref._fit_total else 0
+        ref_ser_dim = len(ref.init) - ref_head - ref._start_idx - 1
 
         for i, f in enumerate(self.fitters[1:], 1):
-            if f._fit_total != ref_fit_total:
+            if f._fit_total != ref._fit_total:
                 raise ValueError(
-                    f"Fitter {i}: fit_total={f._fit_total}, expected {ref_fit_total}"
+                    f"Fitter {i}: fit_total={f._fit_total}, expected {ref._fit_total}"
                 )
-
-            if f._start_idx != ref_start_idx:
+            if f._start_idx != ref._start_idx:
                 raise ValueError(
-                    f"Fitter {i}: _start_idx={f._start_idx}, expected {ref_start_idx}"
+                    f"Fitter {i}: _start_idx={f._start_idx}, expected {ref._start_idx}"
                 )
-
             head = 1 if f._fit_total else 0
             ser_dim = len(f.init) - head - f._start_idx - 1
             if ser_dim != ref_ser_dim:
                 raise ValueError(
                     f"Fitter {i}: SER dimension={ser_dim}, expected {ref_ser_dim}"
                 )
+
+    # ==============================
+    #     Parameter structure
+    # ==============================
 
     def _build_parameter_structure(self):
         ref = self.fitters[0]
@@ -64,314 +78,236 @@ class CombinedFitter:
         self._start_idx = ref._start_idx
         self._head = 1 if self._fit_total else 0
 
-        # Extract shared parameter blocks from reference
-        ref_init = ref.init
-        ref_bounds = ref.bounds
-
         init_parts = []
         bounds_parts = []
+        cursor = 0
 
-        # logA (if fit_total)
+        # --- logA: independent per spectrum ---
         if self._fit_total:
+            self._logA_indices = []
             for f in self.fitters:
                 init_parts.append(np.array([f.init[0]]))
                 bounds_parts.append(f.bounds[0])
-            self._logA_indices = list(range(len(self.fitters)))
+                self._logA_indices.append(cursor)
+                cursor += 1
         else:
             self._logA_indices = []
 
-        cursor = len(self._logA_indices)
-
-        # threshold/pedestal params (if any)
+        # --- shared extra (pedestal) params ---
         if self._start_idx > 0:
-            init_parts.append(ref_init[self._head : self._head + self._start_idx])
-            bounds_parts.extend(ref_bounds[self._head : self._head + self._start_idx])
-            self._threshold_slice = slice(cursor, cursor + self._start_idx)
+            extra_slice = slice(self._head, self._head + self._start_idx)
+            init_parts.append(ref.init[extra_slice])
+            bounds_parts.extend(ref.bounds[extra_slice])
+            self._extra_slice = slice(cursor, cursor + self._start_idx)
             cursor += self._start_idx
         else:
-            self._threshold_slice = slice(0, 0)
+            self._extra_slice = slice(0, 0)
 
-        # SPE
+        # --- shared SER params ---
         ser_start = self._head + self._start_idx
-        ser_end = len(ref_init) - 1
+        ser_end = len(ref.init) - 1  # last element is lam
         self._ser_len = ser_end - ser_start
-        init_parts.append(ref_init[ser_start:ser_end])
-        bounds_parts.extend(ref_bounds[ser_start:ser_end])
+        init_parts.append(ref.init[ser_start:ser_end])
+        bounds_parts.extend(ref.bounds[ser_start:ser_end])
         self._ser_slice = slice(cursor, cursor + self._ser_len)
         cursor += self._ser_len
 
-        # occupancies
-        self._occ_indices = []
+        # --- lam: independent per spectrum ---
+        self._lam_indices = []
         for f in self.fitters:
             init_parts.append(np.array([f.init[-1]]))
             bounds_parts.append(f.bounds[-1])
-            self._occ_indices.append(cursor)
+            self._lam_indices.append(cursor)
             cursor += 1
 
         self.init = np.concatenate(init_parts)
         self.bounds = tuple(bounds_parts)
         self.dof = len(self.init)
 
-        # Store constraints from reference and remap indices to combined parameter space
-        # Constraints apply to SER params, so we need to offset indices
+        # Remap constraints from fitters[0] local SER indices → combined indices
         self.constraints = self._remap_constraints(ref.constraints)
 
     def _remap_constraints(self, constraints):
-        """Remap constraint indices from local SER space to combined parameter space."""
+        """Remap constraint indices from local SER space to combined space."""
         if not constraints:
             return []
 
-        # In the reference fitter, SER params start at index: head + start_idx
-        # In combined fitter, SER params start at: _ser_slice.start
-        # Offset = combined_start - local_start
         local_ser_start = self._head + self._start_idx
         combined_ser_start = self._ser_slice.start
         offset = combined_ser_start - local_ser_start
 
         remapped = []
-        for constraint in constraints:
-            if isinstance(constraint, dict):
-                new_constraint = constraint.copy()
-                new_constraint["coeffs"] = [
-                    (idx + offset, coeff) for idx, coeff in constraint["coeffs"]
-                ]
-                remapped.append(new_constraint)
+        for c in constraints:
+            if isinstance(c, dict):
+                nc = c.copy()
+                nc["coeffs"] = [(idx + offset, coeff) for idx, coeff in c["coeffs"]]
+                remapped.append(nc)
             else:
-                raise ValueError(f"Unknown constraint format: {constraint}")
-
+                raise ValueError(f"Unknown constraint format: {c}")
         return remapped
 
-    def _build_local_args(self, theta: np.ndarray, spec_idx: int) -> np.ndarray:
-        """Build parameter array for individual fitter from combined theta."""
+    # ==============================
+    #     Local arg builder
+    # ==============================
+
+    def _build_local_args(self, theta: np.ndarray, i: int) -> np.ndarray:
+        """Reconstruct the individual fitter's full parameter vector from theta."""
         parts = []
 
         # logA (individual)
         if self._fit_total:
-            parts.append(
-                theta[self._logA_indices[spec_idx] : self._logA_indices[spec_idx] + 1]
-            )
+            parts.append(theta[self._logA_indices[i] : self._logA_indices[i] + 1])
 
-        # threshold/pedestal (shared)
+        # shared extra (pedestal)
         if self._start_idx > 0:
-            parts.append(theta[self._threshold_slice])
+            parts.append(theta[self._extra_slice])
 
-        # SPE
+        # shared SER
         parts.append(theta[self._ser_slice])
 
-        # individual occupancy
-        parts.append(
-            theta[self._occ_indices[spec_idx] : self._occ_indices[spec_idx] + 1]
-        )
+        # lam (individual)
+        parts.append(theta[self._lam_indices[i] : self._lam_indices[i] + 1])
 
         return np.concatenate(parts)
 
+    # ==============================
+    #     Likelihood
+    # ==============================
+
     def log_l(self, theta: np.ndarray) -> float:
-        """Joint log-likelihood."""
-        total_ll = 0.0
-
+        """Joint log-likelihood = sum of individual log-likelihoods."""
+        total = 0.0
         for i, f in enumerate(self.fitters):
-            args_i = self._build_local_args(theta, i)
-            ll_i = f.log_l(args_i)
-
-            if not np.isfinite(ll_i):
+            ll = f.log_l(self._build_local_args(theta, i))
+            if not np.isfinite(ll):
                 return -np.inf
+            total += ll
+        return total
 
-            total_ll += ll_i
+    # ==============================
+    #     Fitting
+    # ==============================
 
-        return total_ll
-
-    def fit(self, strategy=1, tol=1e-01, max_calls=10000, print_level=0):
-        """Fit using Minuit optimizer."""
+    def fit(self, strategy=1, tol=1e-1, max_calls=10000, print_level=0):
+        """Fit with Minuit (pyROOT backend)."""
         import ROOT
 
         ROOT.gErrorIgnoreLevel = ROOT.kError
 
-        def nll_wrapper(par_ptr):
+        def _nll(par_ptr):
             args = np.array([par_ptr[i] for i in range(self.dof)], dtype=float)
             ll = self.log_l(args)
             return 1e30 if not np.isfinite(ll) else -ll
 
-        self._nll_wrapper = nll_wrapper
-        self._fcn = ROOT.Math.Functor(self._nll_wrapper, self.dof)
+        self._nll = _nll
+        fcn = ROOT.Math.Functor(self._nll, self.dof)
 
-        def configure_minimizer(m, strat, tolerance, mc, pl):
-            m.SetFunction(self._fcn)
+        def _setup(m, strat, this_tol):
+            m.SetFunction(fcn)
             m.SetStrategy(strat)
             m.SetErrorDef(0.5)
-            m.SetTolerance(tolerance)
-            m.SetMaxFunctionCalls(mc)
-            m.SetPrintLevel(pl)
-
-            for i, (v0, lim) in enumerate(zip(self.init, self.bounds)):
-                step = 0.1 * (abs(v0) if v0 else 1.0)
-                lo, hi = lim
-                name = f"p{i}"
-
+            m.SetTolerance(this_tol)
+            m.SetMaxFunctionCalls(max_calls)
+            m.SetPrintLevel(print_level)
+            for i, (v0, (lo, hi)) in enumerate(zip(self.init, self.bounds)):
+                step = 0.1 * (abs(float(v0)) or 1.0)
                 if lo is None and hi is None:
-                    m.SetVariable(i, name, float(v0), step)
+                    m.SetVariable(i, f"p{i}", float(v0), step)
                 elif lo is not None and hi is not None:
-                    m.SetLimitedVariable(i, name, float(v0), step, float(lo), float(hi))
+                    m.SetLimitedVariable(i, f"p{i}", float(v0), step, lo, hi)
                 elif lo is not None:
-                    m.SetLowerLimitedVariable(i, name, float(v0), step, float(lo))
+                    m.SetLowerLimitedVariable(i, f"p{i}", float(v0), step, lo)
                 else:
-                    m.SetUpperLimitedVariable(i, name, float(v0), step, float(hi))
+                    m.SetUpperLimitedVariable(i, f"p{i}", float(v0), step, hi)
 
-        print("[INFO] Initial parameters:", flush=True)
-        self._print_params(self.init, self.bounds, prefix="  ")
-
-        fail_count = 0
-        converged = False
-
-        while fail_count < 6:
-            algo = ["Migrad", "Combined", "Migrad", "Combined", "Migrad", "Combined"][
-                fail_count
-            ]
-
-            if fail_count < 2:
-                this_tol = tol
-            elif fail_count < 4:
-                this_tol = min(10 * tol, 1.0)
-            else:
-                this_tol = min(10 * tol, 1.0)
-                strategy = 3 - strategy
-
+        algos = ["Migrad", "Combined", "Migrad", "Combined", "Migrad", "Combined"]
+        for attempt, algo in enumerate(algos):
+            this_tol = tol if attempt < 2 else min(10 * tol, 1.0)
+            this_strat = (3 - strategy) if attempt >= 4 else strategy
             m = ROOT.Math.Factory.CreateMinimizer("Minuit2", algo)
-            configure_minimizer(m, strategy, this_tol, max_calls, print_level)
-
-            ok = m.Minimize()
-            if ok:
-                converged = True
+            _setup(m, this_strat, this_tol)
+            if m.Minimize():
                 break
-            else:
-                print(f"[WARN] Minuit attempt {fail_count+1} failed", flush=True)
-                fail_count += 1
-
-        if not converged:
-            print("[ERROR] Minuit did not converge after 6 attempts", flush=True)
+            print(f"[WARN] Minuit attempt {attempt + 1} failed", flush=True)
+        else:
+            print("[WARN] Minuit did not converge after 6 attempts", flush=True)
 
         m.Hesse()
+        self.converged = m.Status() == 0
 
         fitted = np.array([m.X()[i] for i in range(self.dof)])
         errors = np.array([m.Errors()[i] for i in range(self.dof)])
 
-        self.converged = converged
+        self._store_results(fitted, errors, -m.MinValue())
+        self._minimizer = m
+
+    # ==============================
+    #     Result storage
+    # ==============================
+
+    def _store_results(self, fitted, errors, likelihood):
         self.fitted_params = fitted
         self.param_errors = errors
-        self.likelihood = -m.MinValue()
+        self.likelihood = likelihood
 
-        self.n_data = sum(len(f.hist) + 1 for f in self.fitters)  # +1 for zero bin
-        self.bic = -2 * self.likelihood + self.dof * np.log(self.n_data)
-        self.aic = -2 * self.likelihood + 2 * self.dof
+        # shared extra (pedestal)
+        self.extra_args = fitted[self._extra_slice]
+        self.extra_args_std = errors[self._extra_slice]
 
-        self._minimizer = m
-        self.corr = np.array(
-            [[m.Correlation(i, j) for j in range(self.dof)] for i in range(self.dof)]
-        )
+        # shared SER
+        self.ser_args = fitted[self._ser_slice]
+        self.ser_args_std = errors[self._ser_slice]
 
-        print(f"\n[INFO] Converged: {self.converged}", flush=True)
-        print(f"[INFO] Log-likelihood: {self.likelihood:.6f}", flush=True)
-        print(f"[INFO] n_data: {self.n_data}, n_params: {self.dof}", flush=True)
-        print(f"[INFO] BIC: {self.bic:.6f}", flush=True)
-        print(f"[INFO] AIC: {self.aic:.6f}", flush=True)
-        print("[INFO] Fitted parameters:", flush=True)
-        self._print_params(fitted, self.bounds, errors, prefix="  ")
+        # per-spectrum lam
+        self.lams = fitted[self._lam_indices]
+        self.lams_std = errors[self._lam_indices]
 
-    def _print_params(self, params, bounds, errors=None, prefix=""):
-        """Print parameters with their bounds and optionally errors."""
-        cursor = 0
-
+        # per-spectrum logA (if fit_total)
         if self._fit_total:
-            cursor = len(self._logA_indices)
+            self.logAs = fitted[self._logA_indices]
+            self.logAs_std = errors[self._logA_indices]
 
-        # Threshold/pedestal params
-        if self._start_idx > 0:
-            label = "Pedestal" if self.fitters[0]._isWholeSpectrum else "Threshold"
-            print(f"{prefix}{label} params (shared):", flush=True)
-            for i, idx in enumerate(
-                range(self._threshold_slice.start, self._threshold_slice.stop)
-            ):
-                lo, hi = bounds[idx]
-                lo_str = f"{lo:.4g}" if lo is not None else "-inf"
-                hi_str = f"{hi:.4g}" if hi is not None else "+inf"
+        # info criteria
+        n_data = sum(len(f.hist) + 1 for f in self.fitters)
+        self.aic = 2 * self.dof - 2 * self.likelihood
+        self.bic = self.dof * np.log(n_data) - 2 * self.likelihood
 
-                at_bound = ""
-                if errors is not None:
-                    err_str = f" ± {errors[idx]:.4g}"
-                    # Check if hitting boundary
-                    if lo is not None and abs(params[idx] - lo) < 1e-6:
-                        at_bound = " [AT LOWER BOUND]"
-                    elif hi is not None and abs(params[idx] - hi) < 1e-6:
-                        at_bound = " [AT UPPER BOUND]"
-                else:
-                    err_str = ""
-
-                print(
-                    f"{prefix}  [{i}] = {params[idx]:.4g}{err_str}  (bounds: [{lo_str}, {hi_str}]){at_bound}",
-                    flush=True,
-                )
-
-        # SPE
-        print(f"{prefix}Shared SER params:", flush=True)
-        for i, idx in enumerate(range(self._ser_slice.start, self._ser_slice.stop)):
-            lo, hi = bounds[idx]
-            lo_str = f"{lo:.4g}" if lo is not None else "-inf"
-            hi_str = f"{hi:.4g}" if hi is not None else "+inf"
-
-            at_bound = ""
-            if errors is not None:
-                err_str = f" ± {errors[idx]:.4g}"
-                # Check if hitting boundary
-                if lo is not None and abs(params[idx] - lo) < 1e-6:
-                    at_bound = " [AT LOWER BOUND]"
-                elif hi is not None and abs(params[idx] - hi) < 1e-6:
-                    at_bound = " [AT UPPER BOUND]"
-            else:
-                err_str = ""
-
-            print(
-                f"{prefix}  [{i}] = {params[idx]:.4g}{err_str}  (bounds: [{lo_str}, {hi_str}]){at_bound}",
-                flush=True,
-            )
-
-        if errors is not None:
-            self.ser_args = params[self._ser_slice]
-            self.ser_args_std = errors[self._ser_slice]
-
-            s = self._ser_slice
-            self.spe_corr = np.array(
+        # correlation of shared SER block
+        s = self._ser_slice
+        self.spe_corr = (
+            np.array(
                 [
                     [self._minimizer.Correlation(i, j) for j in range(s.start, s.stop)]
                     for i in range(s.start, s.stop)
                 ]
             )
+            if hasattr(self, "_minimizer")
+            else None
+        )
 
-            ref = self.fitters[0]
-            self.gps = ref.get_gain(self.ser_args, "gp")
-            self.gms = ref.get_gain(self.ser_args, "gm")
+        # gains via fitters[0]
+        ref = self.fitters[0]
+        self.gps = ref.get_gain(self.ser_args, "gp")
+        self.gms = ref.get_gain(self.ser_args, "gm")
 
-        # Occupancies
-        print(f"{prefix}Occupancies:", flush=True)
-        for i, idx in enumerate(self._occ_indices):
-            lo, hi = bounds[idx]
-            lo_str = f"{lo:.4g}" if lo is not None else "-inf"
-            hi_str = f"{hi:.4g}" if hi is not None else "+inf"
+        self._print_results()
 
-            at_bound = ""
-            if errors is not None:
-                err_str = f" ± {errors[idx]:.4g}"
-                # Check if hitting boundary
-                if lo is not None and abs(params[idx] - lo) < 1e-6:
-                    at_bound = " [AT LOWER BOUND]"
-                elif hi is not None and abs(params[idx] - hi) < 1e-6:
-                    at_bound = " [AT UPPER BOUND]"
-            else:
-                err_str = ""
+    def _print_results(self):
+        print(f"\n[INFO] Converged : {self.converged}", flush=True)
+        print(f"[INFO] Log-L     : {self.likelihood:.4f}", flush=True)
+        print(f"[INFO] AIC       : {self.aic:.4f}", flush=True)
+        print(f"[INFO] BIC       : {self.bic:.4f}", flush=True)
 
-            print(
-                f"{prefix}  Spectrum {i}: {params[idx]:.4g}{err_str}  (bounds: [{lo_str}, {hi_str}]){at_bound}",
-                flush=True,
-            )
+        if self._start_idx > 0:
+            names = self.fitters[0].extra_param_names()
+            print("[INFO] Shared pedestal:", flush=True)
+            for name, v, e in zip(names, self.extra_args, self.extra_args_std):
+                print(f"  {name}: {v:.4g} ± {e:.4g}", flush=True)
 
-        if errors is not None:
-            self.occs = params[self._occ_indices]
-            self.occs_std = errors[self._occ_indices]
+        print("[INFO] Shared SER:", flush=True)
+        for i, (v, e) in enumerate(zip(self.ser_args, self.ser_args_std)):
+            print(f"  spe[{i}]: {v:.4g} ± {e:.4g}", flush=True)
+
+        print("[INFO] Per-spectrum lam:", flush=True)
+        for i, (v, e) in enumerate(zip(self.lams, self.lams_std)):
+            print(f"  spectrum {i}: lam={v:.4g} ± {e:.4g}", flush=True)

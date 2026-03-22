@@ -1,3 +1,4 @@
+from .combined import CombinedFitter
 from .utils import (
     merged_pearson_chi2,
     modified_neyman_chi2_A,
