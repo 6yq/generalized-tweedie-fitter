@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 import numpy as np
 
 from math import log, exp
@@ -83,6 +82,7 @@ class PMT_Fitter:
         lam_init=None,
         sample=None,
         q_min=None,
+        pad_right=1.0,
         init=None,
         bounds=None,
         constraints=None,
@@ -134,7 +134,11 @@ class PMT_Fitter:
         )
 
         n_origin = len(self.xsp)
-        self._pad_safe = 2 ** int(np.ceil(np.log2(n_origin))) - n_origin
+        # pad_right extends the grid rightward by pad_right * histogram_width
+        # to prevent circular aliasing from heavy tails
+        _extra = int(pad_right * len(self.hist) * self.sample)
+        _n_target = 2 ** int(np.ceil(np.log2(n_origin + _extra)))
+        self._pad_safe = _n_target - n_origin
         self._n_full = n_origin + self._pad_safe
         self._freq = 2 * np.pi * np.fft.fftfreq(self._n_full, d=self._xsp_width)
         self._shift_padded = 2 * self._shift if self._shift < 0 else 0
