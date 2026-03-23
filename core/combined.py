@@ -37,9 +37,9 @@ class CombinedFitter:
                 f"ref_index={ref_index} out of range for {len(fitters)} fitters."
             )
 
-        # rotate so that the reference fitter is always at index 0
-        self.fitters = fitters[ref_index:] + fitters[:ref_index]
-        self.n_spectra = len(self.fitters)
+        self.fitters = fitters
+        self.n_spectra = len(fitters)
+        self._ref_index = ref_index
 
         self._validate_fitters()
         self._build_parameter_structure()
@@ -52,11 +52,13 @@ class CombinedFitter:
     # ==============================
 
     def _validate_fitters(self):
-        ref = self.fitters[0]
+        ref = self.fitters[self._ref_index]
         ref_head = 1 if ref._fit_total else 0
         ref_ser_dim = len(ref.init) - ref_head - ref._start_idx - 1
 
-        for i, f in enumerate(self.fitters[1:], 1):
+        for i, f in enumerate(self.fitters):
+            if i == self._ref_index:
+                continue
             if f._fit_total != ref._fit_total:
                 raise ValueError(
                     f"Fitter {i}: fit_total={f._fit_total}, expected {ref._fit_total}"
@@ -77,7 +79,7 @@ class CombinedFitter:
     # ==============================
 
     def _build_parameter_structure(self):
-        ref = self.fitters[0]
+        ref = self.fitters[self._ref_index]
 
         self._fit_total = ref._fit_total
         self._start_idx = ref._start_idx
@@ -129,7 +131,7 @@ class CombinedFitter:
         self.bounds = tuple(bounds_parts)
         self.dof = len(self.init)
 
-        # Remap constraints from fitters[0] local SER indices → combined indices
+        # Remap constraints from ref fitter local SER indices → combined indices
         self.constraints = self._remap_constraints(ref.constraints)
 
     def _remap_constraints(self, constraints):
@@ -291,7 +293,7 @@ class CombinedFitter:
         )
 
         # gains via fitters[0]
-        ref = self.fitters[0]
+        ref = self.fitters[self._ref_index]
         self.gps = ref.get_gain(self.ser_args, "gp")
         self.gms = ref.get_gain(self.ser_args, "gm")
 
