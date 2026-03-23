@@ -29,12 +29,17 @@ class CombinedFitter:
         Must all have the same _fit_total, _start_idx, and SER dimension.
     """
 
-    def __init__(self, fitters: List[object]):
+    def __init__(self, fitters: List[object], ref_index: int = 0):
         if not fitters:
             raise ValueError("At least one fitter is required.")
+        if not (0 <= ref_index < len(fitters)):
+            raise ValueError(
+                f"ref_index={ref_index} out of range for {len(fitters)} fitters."
+            )
 
-        self.fitters = fitters
-        self.n_spectra = len(fitters)
+        # rotate so that the reference fitter is always at index 0
+        self.fitters = fitters[ref_index:] + fitters[:ref_index]
+        self.n_spectra = len(self.fitters)
 
         self._validate_fitters()
         self._build_parameter_structure()
