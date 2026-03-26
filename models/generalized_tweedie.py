@@ -241,7 +241,7 @@ class Gen_Tweedie_Fitter(PMT_Fitter):
         self._bounds_in[0] = (ped_mean - ped_mean_fluc, ped_mean + ped_mean_fluc)
         self._bounds_in[1] = (0, None)  # ped_sigma free
         self._bounds_in[2] = (0.5 * spe_mean, 1.5 * spe_mean)
-        self._bounds_in[3] = (0, spe_mean)
+        self._bounds_in[3] = (0.01 * spe_mean, spe_mean)
 
     # ==============================
     #     Reporting
