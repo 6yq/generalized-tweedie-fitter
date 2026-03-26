@@ -156,7 +156,7 @@ class PMT_Fitter:
         Must be called by the subclass once _start_idx is final.
         """
         lam_lo = 1e-06
-        lam_hi = None
+        lam_hi = 10
 
         init_full = list(self._init) + [self._lam_init]
         bounds_full = list(self._bounds_in) + [(lam_lo, lam_hi)]
