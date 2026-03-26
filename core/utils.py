@@ -200,9 +200,8 @@ def compute_init(hist, edges):
         distance=max(3, len(counts) // 40),
     )
     if len(peaks) >= 2:
-        # sort by prominence descending, take the two tallest, then sort by position
-        prom = props["prominences"]
-        top2 = np.sort(peaks[np.argsort(prom)[-2:]])
+        # sort by position. channel 3621 has inusual prominence.
+        top2 = peaks[:2]
         G_rough = float(xs[top2[1]] - xs[top2[0]])
         mu1_rough = float(xs[top2[0]])
     elif len(peaks) == 1:
