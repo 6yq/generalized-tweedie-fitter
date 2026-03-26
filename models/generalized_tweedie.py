@@ -75,7 +75,7 @@ class Gen_Tweedie_Fitter(PMT_Fitter):
         Linear constraints on [spe_params..., lam].
     """
 
-    _DEFAULT_SPE_INIT = (1.0, 0.3, 0.1)
+    _DEFAULT_SPE_INIT = (1.0, 0.3, 0.05)
     _DEFAULT_SPE_BOUNDS = ((1e-6, None), (1e-6, None), (1e-6, 0.999))
     _DEFAULT_CONSTRAINTS = [
         {"coeffs": [(1, 1), (2, -1)], "threshold": 0, "op": ">"},
