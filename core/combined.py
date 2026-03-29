@@ -44,7 +44,7 @@ class CombinedFitter:
         self._validate_fitters()
         self._build_parameter_structure()
 
-        print(f"[INFO] Combined {self.n_spectra} spectra", flush=True)
+        print(f"\n[INFO] Combined {self.n_spectra} spectra", flush=True)
         print(f"[INFO] Total parameters: {self.dof}", flush=True)
 
     # ==============================
